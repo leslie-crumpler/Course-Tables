@@ -1,0 +1,155 @@
+import boto3
+from botocore.exceptions import ClientError
+from boto3.dynamodb.conditions import Attr
+
+REGION = "us-east-1"
+TABLE_NAME = "Courses"
+
+# Initialize the DynamoDB Service Resource targeted at the us-east-1 region
+dynamodb = boto3.resource('dynamodb', region_name=REGION)
+
+
+def create_courses_table():
+    """
+    Creates the 'Courses' table in DynamoDB if it doesn't already exist.
+    DynamoDB Table resource
+    """
+    print("Checking/Creating 'Courses' table...")
+    try:
+        # Define table schema using On-Demand provisioning (PAY_PER_REQUEST)
+        table = dynamodb.create_table(
+            TableName=TABLE_NAME,
+            KeySchema=[
+                {'AttributeName': 'CourseID', 'KeyType': 'HASH'}  # Partition Key
+            ],
+            AttributeDefinitions=[
+                {'AttributeName': 'CourseID', 'AttributeType': 'S'}  # 'S' = String type
+            ],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        print("Waiting for table to become active...")
+        # Pause until AWS confirms the table is fully active
+        table.wait_until_exists()
+        print("Table 'Courses' created successfully!")
+        return table
+
+    except ClientError as e:
+        # If table already exists, catch gracefully and return the active object
+        if e.response['Error']['Code'] == 'ResourceInUseException':
+            print("Table 'Courses' already exists. Proceeding...")
+            return dynamodb.Table(TABLE_NAME)
+
+        print(f"Unexpected error during table creation: {e}")
+        raise
+
+
+def populate_course_data(table):
+    """
+    Populates the 'Courses' table with 10 required course records
+    using a batch writer.
+    """
+    print("Populating 10 course items...")
+    courses = [
+        {"CourseID": "001", "Subject": "SDEV", "CatalogNbr": "300",
+         "Title": "Building Secure Python Applications", "NumCredits": 3},
+        {"CourseID": "002", "Subject": "SDEV", "CatalogNbr": "400",
+         "Title": "Secure Programming in the Cloud", "NumCredits": 3},
+        {"CourseID": "003", "Subject": "CMIS", "CatalogNbr": "141",
+         "Title": "Intro to Programming", "NumCredits": 3},
+        {"CourseID": "004", "Subject": "CMIS", "CatalogNbr": "242",
+         "Title": "Intermediate Programming", "NumCredits": 3},
+        {"CourseID": "005", "Subject": "SDEV", "CatalogNbr": "350",
+         "Title": "Database Security", "NumCredits": 3},
+        {"CourseID": "006", "Subject": "SDEV", "CatalogNbr": "425",
+         "Title": "Mitigating Software Vulnerabilities", "NumCredits": 3},
+        {"CourseID": "007", "Subject": "IFSM", "CatalogNbr": "300",
+         "Title": "Information Systems in Organizations", "NumCredits": 3},
+        {"CourseID": "008", "Subject": "CSIA", "CatalogNbr": "310",
+         "Title": "Cybersecurity Processes and Technologies", "NumCredits": 3},
+        {"CourseID": "009", "Subject": "CSIA", "CatalogNbr": "410",
+         "Title": "Cybersecurity Policy", "NumCredits": 3},
+        {"CourseID": "010", "Subject": "SDEV", "CatalogNbr": "460",
+         "Title": "Software Development Capstone", "NumCredits": 3},
+    ]
+
+    # Use batch_writer to efficiently push multiple items in minimal network requests
+    with table.batch_writer() as batch:
+        for course in courses:
+            batch.put_item(Item=course)
+
+    print("Data insertion complete.")
+
+
+def interactive_search(table):
+    """
+    Runs an interactive loop prompting the user for a course Subject and
+    Catalog Number. Includes explicit data validation and loops until the
+    user chooses to exit.
+    """
+    while True:  # OUTER LOOP: repeats until user enters N.
+
+        # Subject input and validation loop
+        while True:
+            print("Enter the Subject:")
+            subject = input().strip().upper()
+            if subject:
+                break
+            print("A Subject is required. Enter the Subject:")
+
+        # Catalog Number input and validation loop
+        while True:
+            print("Enter the CatalogNbr:")
+            catalog_nbr = input().strip()
+            if catalog_nbr:
+                break
+            print("A CatalogNbr is required. Enter the CatalogNbr:")
+
+        print(f"Searching for {subject} {catalog_nbr}...")
+
+        try:
+            # Scan the table filtering by Subject and CatalogNbr
+            response = table.scan(
+                FilterExpression=(
+                    Attr('Subject').eq(subject) &
+                    Attr('CatalogNbr').eq(catalog_nbr)
+                )
+            )
+
+            items = response.get('Items', [])
+
+            # Print result or a not-found message
+            if items:
+                for item in items:
+                    print(
+                        f"The title of {subject} "
+                        f"{catalog_nbr} is {item.get('Title')}."
+                    )
+            else:
+                print(
+                    f"No courses found matching "
+                    f"{subject} {catalog_nbr}."
+                )
+
+        except ClientError as e:
+            print(f"Search encountered an error: {e}")
+
+        # Continuation prompt — inside outer loop so the program repeats
+        while True:
+            print("Would you like to search for another title? (Y or N)")
+            repeat = input().strip().upper()
+
+            if repeat in ('Y', 'N'):
+                break
+
+            print("Invalid option. Please enter Y or N.")
+
+        if repeat == 'N':
+            print("Thanks for using the Catalog Search program.")
+            break  # exits the outer while True loop
+
+
+if __name__ == "__main__":
+    # Orchestrate the full database lifecycle workflow
+    courses_table = create_courses_table()
+    populate_course_data(courses_table)
+    interactive_search(courses_table) 
